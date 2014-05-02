@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="DieselVM.cpp" />
+    <ClCompile Include="src\ScriptVM.cpp" />
+    <ClCompile Include="test\TokenizerTest.cpp">
+      <Filter>test</Filter>
+    </ClCompile>
+    <ClCompile Include="test\ScriptEnvironmentTest.cpp">
+      <Filter>test</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Tokenizer.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\ScriptVM.h" />
+    <ClInclude Include="src\catch.hpp" />
+    <ClInclude Include="src\Tokenizer.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="test">
+      <UniqueIdentifier>{d3e717f3-ccd3-4bf5-a3e3-61000fc9f874}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
