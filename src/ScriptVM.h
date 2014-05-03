@@ -3,20 +3,25 @@
 #include <dxstdafx.h>
 #include <vector>
 #include <utils\StringUtils.h>
+#include "..\..\math\Vector.h"
+#include <utils\Color.h>
 // ---------------------------------------------------
 // OpCode
 // ---------------------------------------------------
-enum OpCode {OP_ADD,OP_SUB,OP_MUL,OP_DIV,OP_SIN,OP_COS,OP_ASSIGN};
+enum OpCode {OP_ADD,OP_SUB,OP_MUL,OP_DIV,OP_SIN,OP_COS,OP_ASSIGN,OP_NEW_VEC2,OP_RND};
+
+enum VarType {DT_INT,DT_FLOAT,DT_VEC2,DT_VEC3,DT_COLOR,DT_UNKNOWN};
 
 struct TypeDeclaration {
 
-	enum Type {DT_INT,DT_FLOAT,DT_VEC2,DT_VEC3,DT_COLOR};
+	
 
-	TypeDeclaration(const char* name,Type type) : type(type) {
+	TypeDeclaration() : hash(0) , type(DT_UNKNOWN) {}
+	TypeDeclaration(const char* name,VarType type) : type(type) {
 		hash = ds::string::murmur_hash(name);
 	}
 
-	Type type;
+	VarType type;
 	uint32 hash;
 
 };
@@ -25,10 +30,10 @@ struct TypeDeclaration {
 // ---------------------------------------------------
 struct Token {
 
-	enum TokenType {UNKNOWN,OPEN,CLOSE,ASSIGN,SUB,ADD,DIV,MUL,NAME,FUNCTION,FLOAT,CONSTANT,DECLARATION};
+	enum TokenType {UNKNOWN,OPEN,SEMICOLON,CLOSE,ASSIGN,SUB,ADD,DIV,MUL,NAME,FUNCTION,FLOAT,CONSTANT,DECLARATION};
 
-	Token() : type(UNKNOWN) {}      
-	Token(TokenType type) : type(type) {}
+	Token() : type(UNKNOWN) , id(0) {}      
+	Token(TokenType type) : type(type) , id(0) {}
 	Token(TokenType type,float value) : type(type) , value(value) {}
 	Token(TokenType type,uint32 id) : type(type) , id(id) {}
 
@@ -39,23 +44,29 @@ struct Token {
 	};
 };
 
-// ---------------------------------------------------
-// Function
-// ---------------------------------------------------
-struct Function {
+// -------------------------------------------------------
+// Stack item
+// -------------------------------------------------------
+struct StackItem {
 
-	OpCode opCode;
-	int precedence;
-	int arity;
-	uint32 hash;
+	VarType type;
+	float values[4];
 
-	Function() {}
-	Function(const char* name,OpCode opCode,int precedence,int arity) : opCode(opCode) , precedence(precedence) , arity(arity) {
-		hash = ds::string::murmur_hash(name,strlen(name),0);
+	StackItem() : type(DT_FLOAT) {
+		for ( int i = 0; i < 4; ++i ) {
+			values[i] = 0.0f;
+		}
 	}
 
-};
+	StackItem(float v) : type(DT_FLOAT) {
+		values[0] = v;
+	}
 
+	StackItem(const Vector2f& v) : type(DT_VEC2) {
+		values[0] = v.x;
+		values[1] = v.y;
+	}
+};
 // ---------------------------------------------------
 // Stack
 // ---------------------------------------------------
@@ -68,27 +79,69 @@ public:
 		}
 	}
 	~Stack() {}
-	const float get(uint32 id) const {
+	const StackItem get(uint32 id) const {
 		return m_Data[id];
 	}
 	void push(float v) {
-		if ( m_Size != m_Capacity ) {
-			m_Data[m_Size++] = v;
-		}
+		assert( m_Size != m_Capacity );
+		StackItem item(v);
+		m_Data[m_Size++] = item;
 	}
-	float pop() {
-		// assert m_Size > 0
+	void push(const Vector2f& v) {
+		assert( m_Size != m_Capacity );
+		StackItem item(v);
+		m_Data[m_Size++] = item;
+	}
+	StackItem pop() {
+		assert(m_Size > 0);
 		return m_Data[--m_Size];
+	}
+	Vector2f popVec2() {
+		StackItem item = pop();
+		assert(item.type == DT_VEC2);
+		return Vector2f(item.values[0],item.values[1]);
 	}
 	const uint32 size() const {
 		return m_Size;
 	}
 private:
-	float m_Data[64];
+	StackItem m_Data[64];
 	uint32 m_Size;
 	uint32 m_Capacity;
 };	
 
+typedef void (*scriptFunctionPointer) (Stack& stack);
+
+void scriptAddOperation(Stack& stack);
+void scriptNewVec2(Stack& stack);
+void scriptAssign(Stack& stack);
+void scriptRandom(Stack& stack);
+void scriptMul(Stack& stack);
+// ---------------------------------------------------
+// Function
+// ---------------------------------------------------
+struct Function {
+
+	OpCode opCode;
+	int precedence;
+	int arity;
+	uint32 hash;
+	scriptFunctionPointer functionPtr;
+
+	Function() {}
+	Function(const char* name,OpCode opCode,int precedence,int arity,scriptFunctionPointer ptr) : opCode(opCode) , precedence(precedence) , arity(arity) , functionPtr(ptr) {
+		hash = ds::string::murmur_hash(name,strlen(name),0);
+	}
+
+};
+
+struct ScriptBlock {
+
+	uint32 byteCode[64];
+	uint32 bytes;
+	uint32 assignmentID;
+
+};
 // ---------------------------------------------------
 // Script context
 // ---------------------------------------------------
@@ -97,12 +150,21 @@ class ScriptContext {
 	struct FloatValue {
 
 		uint32 hash;
-		float* value;
+		union {
+			float* value;
+			Vector2f* v2;
+			Vector3f* v3;
+			ds::Color* c;
+		};
+		VarType type;
+		bool keepAlive;
 
 		FloatValue() : hash(0) {}
 
 		FloatValue(const char* name,float* v) : value(v) {
 			hash = ds::string::murmur_hash(name,strlen(name),0);
+			type = DT_FLOAT;
+			keepAlive = false;
 		}
 	};    
 
@@ -126,7 +188,12 @@ public:
 	ScriptContext();
 	ScriptContext(const ScriptContext& orig);
 	virtual ~ScriptContext();
-	uint32 addVariable(const char* name,float* value);
+	uint32 addVariable(const char* name,float* value,bool keepAlive = false);
+	uint32 addVariable(const char* name,Vector2f* v,bool keepAlive = false);
+	uint32 addVariable(IdString hash,Vector2f* v,bool keepAlive = false);
+	const VarType& getVariableType(uint32 id) const {
+		return m_Variables[id].type;
+	}
 	const uint32 numConstants() const {
 		return m_Constants.size();
 	}
@@ -151,8 +218,14 @@ public:
 	const float getVariable(uint32 idx) const {
 		return *m_Variables[idx].value;
 	}
+	const Vector2f getVec2Variable(uint32 idx) const {
+		return *m_Variables[idx].v2;
+	}
 	void setVariable(uint32 idx,float v) {
 		*m_Variables[idx].value = v;
+	}
+	void setVariable(uint32 idx,const Vector2f& v) {
+		*m_Variables[idx].v2 = v;
 	}
 	const float getData(uint32 idx) const {
 		return m_Data[idx];
@@ -163,6 +236,9 @@ public:
 	const char* translateFunction(uint32 id) const;
 	const float getConstant(uint32 id) const {
 		return m_Constants[id].value;
+	}
+	const TypeDeclaration& getDeclaration(uint32 id) const {
+		return m_Declarations[id];
 	}
 private:
 	uint32 m_DataIndex;
