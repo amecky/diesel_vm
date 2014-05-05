@@ -4,14 +4,18 @@
 #include <windef.h>
 #include <math.h>
 #include "..\..\math\Vector.h"
+#include <fstream>
+#include <io\BinaryWriter.h>
+#include <io\BinaryLoader.h>
 
 enum ByteCode {
-	BC_FUNCTION = 0x7f800000, // 2139095040
-	BC_PUSH_VAR = 0x7f900000, // 2140143616
-	BC_NUMBER   = 0x7fa00000, // 2141192192
-	BC_CONSTANT = 0x7fc00000, 
-	BC_ASSIGN   = 0x7fd00000, 
-	BC_END      = 0x7fb00000  // 2142240768
+	BC_FUNCTION    = 0x7f800000, // 2139095040
+	BC_PUSH_VAR    = 0x7f900000, // 2140143616
+	BC_NUMBER      = 0x7fa00000, // 2141192192
+	BC_CONSTANT    = 0x7fc00000, 
+	BC_ASSIGN      = 0x7fd00000, 
+	BC_DECLARATION = 0x7fe00000, 
+	BC_END         = 0x7fb00000  // 2142240768
 };
 
 /// Returns the byte code operation part of the byte code word.
@@ -29,31 +33,35 @@ static inline bool is_bc_push_float(uint32 i) {
 	return (i & 0x7f80000) != 0x7f8;
 }
 
-/// Computes the function specified by @a op_code on the @a stack.
-/*
-static inline void compute_function(OpCode op_code, Stack &stack) {
-	float a,b;
-	switch(op_code) {
-		case OP_ADD: 
-			b = stack.pop(); 
-			a = stack.pop(); 
-			stack.push(a+b); 
-			break;
-		case OP_SUB: b=stack.pop(); a=stack.pop(); stack.push(a-b); break;
-		case OP_MUL: b=stack.pop(); a=stack.pop(); stack.push(a*b); break;
-		case OP_DIV: b=stack.pop(); a=stack.pop(); stack.push(a/b); break;
-		case OP_SIN: stack.push(sinf(stack.pop())); break;
-		case OP_COS: stack.push(cosf(stack.pop())); break;
-		case OP_NEW_VEC2: a = stack.pop(); b = stack.pop(); stack.push(Vector2f(a,b)); break;
-	}
-}
-*/
+// -------------------------------------------------------
+// Tokenizer
+// -------------------------------------------------------
 Tokenizer::Tokenizer() {}
 
 Tokenizer::Tokenizer(const Tokenizer& orig) {}
 
-Tokenizer::~Tokenizer() {}
+Tokenizer::~Tokenizer() {
+}
 
+// -------------------------------------------------------
+// load script
+// -------------------------------------------------------
+uint32 Tokenizer::loadScript(const char* fileName,ScriptContext& context,std::vector<ScriptBlock>& blocks,bool debug) {
+	std::string line;
+	std::string result = "";
+	std::ifstream myfile(fileName);
+	if (myfile.is_open()) {
+		while ( std::getline(myfile, line)) {
+			result += line;
+		}
+		myfile.close();    
+	}		
+	return compile(result.c_str(),context,blocks,debug);
+}
+
+// -------------------------------------------------------
+// Convert
+// -------------------------------------------------------
 uint32 Tokenizer::convert(const char* p,ScriptContext& env,Token* tokens,int maxTokens,uint32* programmCounters) {
 	int cnt = 0;
 	int pcCounter = 0;
@@ -80,17 +88,28 @@ uint32 Tokenizer::convert(const char* p,ScriptContext& env,Token* tokens,int max
 				decl = env.getDeclaration(t.id);
 			}
 			else if ( t.type == Token::UNKNOWN && decl.type != DT_UNKNOWN ) {
+				IdString hash = ds::string::murmur_hash(ident,p-ident,0);
 				// register new variable
-				printf("creating new variable type %d\n",decl.type);
-				if ( decl.type == DT_VEC2 ) {
+				//printf("creating new variable type %d\n",decl.type);
+				if ( decl.type == DT_INT ) {
+					int* v = new int;
+					uint32 id = env.addVariable(hash,v);
+					t = Token(Token::NAME,id);
+				}
+				else if ( decl.type == DT_VEC2 ) {
 					Vector2f* v = new Vector2f;
-					IdString hash = ds::string::murmur_hash(ident,p-ident,0);
+					uint32 id = env.addVariable(hash,v);
+					t = Token(Token::NAME,id);
+				}
+				else if ( decl.type == DT_FLOAT ) {
+					float* v = new float;
 					uint32 id = env.addVariable(hash,v);
 					t = Token(Token::NAME,id);
 				}
 				else {
 					t = Token(Token::NAME);
 				}
+				//printf("variable id %d\n",t.id);
 			}
 		}
 		else {
@@ -100,7 +119,6 @@ uint32 Tokenizer::convert(const char* p,ScriptContext& env,Token* tokens,int max
 			case ';' : {
 				t = Token(Token::SEMICOLON); 
 				programmCounters[pcCounter++] = cnt;
-				//++pcCounter;
 				break;
 			}
 			case ' ' : 
@@ -177,6 +195,9 @@ uint32 Tokenizer::generateBytecode(Token* rpl, uint32 numTokens, const ScriptCon
 		//Function f;
 		Token t = rpl[i];
 		switch (t.type) {
+			case Token::DECLARATION :
+				op = BC_DECLARATION;
+				break;
 			case Token::FLOAT :
 				op = BC_NUMBER + t.id;                
 				break;
@@ -194,6 +215,7 @@ uint32 Tokenizer::generateBytecode(Token* rpl, uint32 numTokens, const ScriptCon
 				printf("Unknown token\n");
 				break;
 		}
+		//printf("op %d id %d\n",op,t.id);
 		if ( size < maxCapacity ) {
 			byteCode[size++] = op;
 		}
@@ -213,23 +235,39 @@ void Tokenizer::setAssignment(uint32 firstByte,Stack& stack,ScriptContext& conte
 	if ( type == DT_FLOAT ) {
 		context.setVariable(id,item.values[0]);
 	}
+	else if ( type == DT_INT ) {
+		context.setVariable(id,static_cast<int>(item.values[0]));
+	}
 	else if ( type == DT_VEC2 ) {
 		Vector2f v(item.values[0],item.values[1]);
 		context.setVariable(id,v);
 	}
 }
 
-bool Tokenizer::run(const uint32 *byteCode,ScriptContext& context,Stack &stack) {
+bool Tokenizer::run(const uint32 *byteCode,ScriptContext& context,Stack &stack,bool debug) {
 	const uint32 *p = byteCode;
 	while (true) {
 		uint32 bc = *p++;
 		uint32 op = bc_mask(bc);
 		uint32 id = id_mask(bc);
+		if ( debug ) {
+			if ( op == BC_FUNCTION ) {
+				printf("op %s id %s\n",translateOpCode(op),context.translateFunction(id));
+			}
+			else {
+				printf("op %s id %d\n",translateOpCode(op),id);
+			}
+		}
 		switch (op) {
+			case BC_DECLARATION:
+				break;
 			case BC_PUSH_VAR: {
 				VarType type = context.getVariableType(id);
 				if ( type == DT_VEC2 ) {
 					stack.push(context.getVec2Variable(id));
+				}
+				else if ( type == DT_INT ) {
+					stack.push(context.getIntVariable(id));
 				}
 				else {
 					stack.push(context.getVariable(id));
@@ -245,7 +283,12 @@ bool Tokenizer::run(const uint32 *byteCode,ScriptContext& context,Stack &stack) 
 			case BC_FUNCTION: {
 				Function f = context.getFunction(id);
 				if (  f.opCode == OP_ASSIGN ) {
-					setAssignment(byteCode[0],stack,context);
+					int first = 0;
+					uint32 tmpOC = bc_mask(byteCode[0]);
+					if ( tmpOC == BC_DECLARATION ) {
+						++first;
+					}
+					setAssignment(byteCode[first],stack,context);
 				}
 				else {
 					f.functionPtr(stack);
@@ -265,6 +308,19 @@ void Tokenizer::debugStack(const Stack& stack) {
 	printf("stack size: %d\n",stack.size());
 	for ( int i = 0; i < stack.size(); ++i ) {
 		printf("%d = %3.2f\n",i,stack.get(i));
+	}
+}
+
+const char* Tokenizer::translateOpCode(uint32 opCode) {
+	switch ( opCode ) {
+		case 2139095040 : return "BC_FUNCTION";break;
+		case 2140143616 : return "BC_PUSH_VAR";break;
+		case 2141192192 : return "BC_NUMBER";break;
+		case 2143289344 : return "BC_CONSTANT";break;
+		case 2144337920 : return "BC_ASSIGN";break;
+		case 2145386496 : return "BC_DECLARATION";break;
+		case 2142240768 : return "BC_END";break;
+		default: return "UNKNOWN";
 	}
 }
 
@@ -318,4 +374,96 @@ uint32 Tokenizer::compile(const char* p, ScriptContext& context, std::vector<Scr
 	return generateBytecode(rpl,rpls,context,byteCode,maxCapacity);
 	*/
 	return 0;
+}
+
+bool Tokenizer::run(std::vector<ScriptBlock>& blocks,ScriptContext& context,bool debug) {
+	Stack stack;
+	for ( size_t i = 0; i < blocks.size(); ++i ) {
+		ScriptBlock& block = blocks[i];
+		if ( !run(block.byteCode,context,stack,debug) ) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void Tokenizer::saveByteCode(std::vector<ScriptBlock>& blocks,ScriptContext& env ) {
+	BinaryWriter writer;
+	int signature[] = {0,8,15};
+	writer.open("Test.sb",signature,3);
+	uint32 vars = env.numVariables();
+	for ( uint32 i = 0; i < vars; ++i ) {
+		writer.startChunk(1,1);
+		int varType = env.getVariableType(i);
+		writer.write(varType);
+		writer.write(env.getVariableHash(i));
+		writer.closeChunk();
+	}
+	writer.startChunk(3,1);
+	writer.write(env.numData());
+	for ( uint32 i = 0; i < env.numData(); ++i ) {
+		writer.write(env.getData(i));
+	}
+	writer.closeChunk();
+	for ( size_t i = 0; i < blocks.size(); ++i ) {
+		ScriptBlock& block = blocks[i];
+		writer.startChunk(2,1);
+		writer.write(block.bytes);
+		writer.write(block.assignmentID);
+		for ( int j = 0; j < block.bytes; ++j) {
+			writer.write(block.byteCode[j]);
+		}
+		writer.closeChunk();
+	}
+	
+	writer.close();
+	
+}
+
+void Tokenizer::loadByteCode(const char* fileName,std::vector<ScriptBlock>& blocks,ScriptContext& env) {
+	BinaryLoader loader;
+	int signature[] = {0,8,15};
+	loader.open(fileName,signature,3);
+	while ( loader.openChunk() == 0 ) {
+		if ( loader.getChunkID() == 1 ) {			
+			int type = 0;
+			loader.read(&type);
+			IdString hash;
+			loader.read(&hash);
+			// enum VarType {DT_INT,DT_FLOAT,DT_VEC2,DT_VEC3,DT_COLOR,DT_UNKNOWN};
+			if ( type == 0 ) {
+				env.addVariable(hash,new int,true);
+			}
+			if ( type == 1 ) {
+				env.addVariable(hash,new float,true);
+			}
+			if ( type == 2 ) {
+				env.addVariable(hash,new Vector2f(0,0),true);
+			}
+			printf("adding var type %d = %d\n",type,hash);
+		}
+		else if ( loader.getChunkID() == 2 ) {							
+			ScriptBlock block;
+			loader.read(&block.bytes);
+			loader.read(&block.assignmentID);
+			for ( uint32 i = 0; i < block.bytes; ++i ) {
+				loader.read(&block.byteCode[i]);
+			}
+			printf("block added with %d bytes\n",block.bytes);
+			blocks.push_back(block);
+
+		}
+		else if ( loader.getChunkID() == 3 ) {	
+			uint32 num = 0;
+			loader.read(&num);
+			printf("data %d\n",num);
+			for ( uint32 i = 0; i < num; ++i ) {
+				float v = 0.0f;
+				loader.read(&v);
+				env.setData(i,v);
+			}
+		}
+		loader.closeChunk();
+	}		
+	loader.close();
 }

@@ -1,0 +1,4 @@
+vec2 u = vector2(10,20);
+printf(u);
+vec2 t = vector2(20,10);
+v = u * 4 + t;

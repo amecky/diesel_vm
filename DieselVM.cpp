@@ -1,11 +1,12 @@
-//#define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
-//#include "src\catch.hpp"
+#define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
+#include "src\catch.hpp"
+/*
 #include <cstdlib>
 #include <stdio.h>
 #include "src\ScriptVM.h"
 #include "src\Tokenizer.h"
 
-const bool SCRIPT_DEBUG = false;
+const bool SCRIPT_DEBUG = true;
 
 int main(int argc, char** args) {
 	ScriptContext context;
@@ -17,7 +18,7 @@ int main(int argc, char** args) {
 	std::vector<ScriptBlock> blocks;
 
 	//uint32 bytes = tokenizer.compile("x = 1 + 2 + sin(PI * 0.5)",context,byteCode,128,SCRIPT_DEBUG);
-	uint32 bytes = tokenizer.compile("float y = 20 * x; x = 4 * y;v = v * x;",context,blocks,SCRIPT_DEBUG);
+	uint32 bytes = tokenizer.compile("int gx = random(0,8);",context,blocks,SCRIPT_DEBUG);
 	if ( SCRIPT_DEBUG ) {
 		printf("bytes: %d\n",bytes);
 	}
@@ -33,8 +34,9 @@ int main(int argc, char** args) {
 			}
 		}
 	}
-	printf("x = %3.2f \n",x);
-	printf("v.x = %3.2f v.y = %3.2f\n",v.x,v.y);
+	//printf("x = %3.2f \n",x);
+	//printf("v.x = %3.2f v.y = %3.2f\n",v.x,v.y);
 	return 0;
 }
 
+*/

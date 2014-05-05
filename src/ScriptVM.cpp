@@ -50,6 +50,19 @@ void scriptAssign(Stack& stack) {
 
 }
 
+void scriptPrint(Stack& stack) {
+	StackItem a = stack.pop();
+	if ( a.type == DT_FLOAT ) {
+		printf("%3.2f\n",a.values[0]);
+	}
+	else if ( a.type == DT_INT ) {
+		printf("%d\n",static_cast<int>(a.values[0]));
+	}
+	else if ( a.type == DT_VEC2 ) {
+		printf("x : %3.2f y : %3.2f\n",a.values[0],a.values[1]);
+	}
+}
+
 void scriptRandom(Stack& stack) {
 	assert(stack.size() >= 2);
 	StackItem a = stack.pop();
@@ -69,6 +82,7 @@ ScriptContext::ScriptContext() : m_VariableIndex(0) , m_DataIndex(0) {
 	//m_Functions.push_back(Function("cos",OP_COS,17,1));
 	m_Functions.push_back(Function("=",OP_ASSIGN,1,1,scriptAssign));
 	m_Functions.push_back(Function("random",OP_RND,20,2,scriptRandom));
+	m_Functions.push_back(Function("print",OP_RND,19,1,scriptPrint));
 	m_Functions.push_back(Function("vector2",OP_NEW_VEC2,20,2,scriptNewVec2));
 
 	m_Constants.push_back(ConstantValue("PI",3.14159265359f));
@@ -84,16 +98,31 @@ ScriptContext::ScriptContext(const ScriptContext& orig) {
 }
 
 ScriptContext::~ScriptContext() {
+	for ( uint32 i = 0; i < m_VariableIndex; ++i ) {
+		if ( !m_Variables[i].keepAlive ) {
+			switch ( m_Variables[i].type) {
+				case DT_INT: delete(m_Variables[i].ival);break;
+				case DT_FLOAT: delete(m_Variables[i].value);break;
+				case DT_VEC2: delete(m_Variables[i].v2);break;
+			}
+		}
+	}
 }
 
 // -------------------------------------------------------
 // Add variable
 // -------------------------------------------------------
 uint32 ScriptContext::addVariable(const char* name, float* value,bool keepAlive) {
+	IdString hash = ds::string::murmur_hash(name,strlen(name),0);
+	return addVariable(hash,value,keepAlive);
+}
+
+uint32 ScriptContext::addVariable(IdString hash,float* value,bool keepAlive) {
 	uint32 ret = m_VariableIndex;
 	FloatValue* c = &m_Variables[m_VariableIndex];
-	c->hash = ds::string::murmur_hash(name,strlen(name),0);
+	c->hash = hash;
 	c->value = value;
+	*c->value = 0.0f;
 	c->type = DT_FLOAT;
 	c->keepAlive = keepAlive;
 	++m_VariableIndex;
@@ -108,6 +137,18 @@ uint32 ScriptContext::addVariable(const char* name, Vector2f* value,bool keepAli
 	return addVariable(hash,value,keepAlive);
 }
 
+uint32 ScriptContext::connectVariable(const char* name,Vector2f* v,bool keepAlive) {
+	IdString hash = ds::string::murmur_hash(name,strlen(name),0);
+	for ( uint32 i = 0; i < numVariables(); ++i ) {
+		FloatValue* c = &m_Variables[i];
+		if ( c->hash == hash ) {
+			delete c->v2;
+			c->v2 = v;
+			return i;
+		}
+	}
+	return UINT_MAX;
+}
 // -------------------------------------------------------
 // Add variable
 // -------------------------------------------------------
@@ -116,8 +157,28 @@ uint32 ScriptContext::addVariable(IdString hash, Vector2f* value,bool keepAlive)
 	FloatValue* c = &m_Variables[m_VariableIndex];
 	c->hash = hash;
 	c->v2 = value;
+	*c->v2 = Vector2f(0,0);
 	c->keepAlive = keepAlive;
 	c->type = DT_VEC2;
+	++m_VariableIndex;
+	return ret;
+}
+
+uint32 ScriptContext::addVariable(const char* name,int* v,bool keepAlive) {
+	IdString hash = ds::string::murmur_hash(name,strlen(name),0);
+	return addVariable(hash,v,keepAlive);
+}
+// -------------------------------------------------------
+// Add variable
+// -------------------------------------------------------
+uint32 ScriptContext::addVariable(IdString hash, int* value,bool keepAlive) {
+	uint32 ret = m_VariableIndex;
+	FloatValue* c = &m_Variables[m_VariableIndex];
+	c->hash = hash;
+	c->ival = value;
+	*c->ival = 0;
+	c->keepAlive = keepAlive;
+	c->type = DT_INT;
 	++m_VariableIndex;
 	return ret;
 }
@@ -195,12 +256,14 @@ const char* ScriptContext::translateFunction(uint32 id) const {
 	switch ( id ) {
 		case 0 : return "OP_ADD";
 		case 1 : return "OP_MUL";
-		case 2 : return "OP_DIV";
-		case 3 : return "OP_SUB";
-		case 4 : return "OP_SIN";
-		case 5 : return "OP_COS";
-		case 6 : return "OP_ASSIGN";
-		case 7 : return "OP_NEW_VEC2";
+		//case 2 : return "OP_DIV";
+		//case 3 : return "OP_SUB";
+		//case 4 : return "OP_SIN";
+		//case 5 : return "OP_COS";
+		case 2 : return "OP_ASSIGN";
+		case 3 : return "OP_RANDOM";
+		case 4 : return "OP_PRINT";
+		case 5 : return "OP_NEW_VEC2";
 		default : return "UNKNOWN";
 	}
 }

@@ -8,10 +8,16 @@
 // ---------------------------------------------------
 // OpCode
 // ---------------------------------------------------
-enum OpCode {OP_ADD,OP_SUB,OP_MUL,OP_DIV,OP_SIN,OP_COS,OP_ASSIGN,OP_NEW_VEC2,OP_RND};
+enum OpCode {OP_ADD,OP_SUB,OP_MUL,OP_DIV,OP_SIN,OP_COS,OP_ASSIGN,OP_NEW_VEC2,OP_RND,OP_PRINT};
 
+// -------------------------------------------------------
+// Variable types
+// -------------------------------------------------------
 enum VarType {DT_INT,DT_FLOAT,DT_VEC2,DT_VEC3,DT_COLOR,DT_UNKNOWN};
 
+// -------------------------------------------------------
+// Type declaration
+// -------------------------------------------------------
 struct TypeDeclaration {
 
 	
@@ -87,6 +93,12 @@ public:
 		StackItem item(v);
 		m_Data[m_Size++] = item;
 	}
+	void push(int v) {
+		assert( m_Size != m_Capacity );
+		StackItem item(static_cast<float>(v));
+		item.type = DT_INT;
+		m_Data[m_Size++] = item;
+	}
 	void push(const Vector2f& v) {
 		assert( m_Size != m_Capacity );
 		StackItem item(v);
@@ -110,6 +122,10 @@ private:
 	uint32 m_Capacity;
 };	
 
+
+// -------------------------------------------------------
+// Functions
+// -------------------------------------------------------
 typedef void (*scriptFunctionPointer) (Stack& stack);
 
 void scriptAddOperation(Stack& stack);
@@ -117,6 +133,7 @@ void scriptNewVec2(Stack& stack);
 void scriptAssign(Stack& stack);
 void scriptRandom(Stack& stack);
 void scriptMul(Stack& stack);
+void scriptPrint(Stack& stack);
 // ---------------------------------------------------
 // Function
 // ---------------------------------------------------
@@ -135,6 +152,9 @@ struct Function {
 
 };
 
+// -------------------------------------------------------
+// Script block
+// -------------------------------------------------------
 struct ScriptBlock {
 
 	uint32 byteCode[64];
@@ -151,6 +171,7 @@ class ScriptContext {
 
 		uint32 hash;
 		union {
+			int* ival;
 			float* value;
 			Vector2f* v2;
 			Vector3f* v3;
@@ -189,8 +210,12 @@ public:
 	ScriptContext(const ScriptContext& orig);
 	virtual ~ScriptContext();
 	uint32 addVariable(const char* name,float* value,bool keepAlive = false);
+	uint32 addVariable(IdString hash,float* value,bool keepAlive = false);
 	uint32 addVariable(const char* name,Vector2f* v,bool keepAlive = false);
 	uint32 addVariable(IdString hash,Vector2f* v,bool keepAlive = false);
+	uint32 connectVariable(const char* name,Vector2f* v,bool keepAlive = false);
+	uint32 addVariable(IdString hash,int* v,bool keepAlive = false);
+	uint32 addVariable(const char* name,int* v,bool keepAlive = false);
 	const VarType& getVariableType(uint32 id) const {
 		return m_Variables[id].type;
 	}
@@ -215,14 +240,23 @@ public:
 		++m_DataIndex;
 		return idx;
 	}
+	const IdString getVariableHash(uint32 idx) const {
+		return m_Variables[idx].hash;
+	}
 	const float getVariable(uint32 idx) const {
 		return *m_Variables[idx].value;
 	}
 	const Vector2f getVec2Variable(uint32 idx) const {
 		return *m_Variables[idx].v2;
 	}
+	const int getIntVariable(uint32 idx) const {
+		return *m_Variables[idx].ival;
+	}
 	void setVariable(uint32 idx,float v) {
 		*m_Variables[idx].value = v;
+	}
+	void setVariable(uint32 idx,int v) {
+		*m_Variables[idx].ival = v;
 	}
 	void setVariable(uint32 idx,const Vector2f& v) {
 		*m_Variables[idx].v2 = v;
@@ -239,6 +273,12 @@ public:
 	}
 	const TypeDeclaration& getDeclaration(uint32 id) const {
 		return m_Declarations[id];
+	}
+	const uint32 numVariables() const {
+		return m_VariableIndex;
+	}
+	const uint32 numData() const {
+		return m_DataIndex;
 	}
 private:
 	uint32 m_DataIndex;
